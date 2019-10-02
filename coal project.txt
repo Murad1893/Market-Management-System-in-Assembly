@@ -1,0 +1,1600 @@
+INCLUDE Irvine32.inc
+INCLUDE macros.inc
+
+product STRUCT
+
+id byte "Product id: ",3 DUP(?),0
+category byte "Product category: ",10 DUP (?),0
+stock byte "Stock: ",5 DUP(?),0
+price byte "Price: ",5 DUP(?),0
+
+
+product ENDS
+
+sales STRUCT
+
+id byte "Sales id: ",5 DUP(?),0
+sellprod_id byte "Product id: ",3 DUP(?),0
+sale_price byte "Price: ",5 DUP(?),0
+sale_quantity byte "Quantity: ",5 DUP(?),0
+total byte "Transcation amount: ",7 DUP(?),0
+
+sales ENDS
+
+.data
+
+;admin pass
+password BYTE "admin123",0
+pass_check BYTE 20 DUP(?),0
+
+caption BYTE "Error",0
+caption1 BYTE "Confirmation",0
+question BYTE "You are leaving without a checkout! Do you want to checkout or not?",0
+question1 BYTE "Cart is empty",0
+question2 BYTE "Do you want to update category?",0
+question3 BYTE "Do you want to update price?",0
+question4 BYTE "Do you want to update stock?",0
+question5 BYTE "We are very sorry to say that the product you require is not sufficiently available in the stock"
+		  BYTE 0Dh,0Ah
+		  BYTE "So would you like to enter a new quantity or not?",0
+message5 BYTE "Product Out of Stock! Exiting......",0
+
+systime SYSTEMTIME <>
+prod product <>
+sale sales<>
+
+;months
+m1 byte " Jan ",0
+m2 byte " Feb ",0
+m3 byte " Mar ",0
+m4 byte " Apr ",0
+m5 byte " May ",0
+m6 byte " Jun ",0
+m7 byte " Jul ",0
+m8 byte " Aug ",0
+m9 byte " Sept ",0
+m10 byte " Oct ",0
+m11 byte " Nov ",0
+m12 byte " Dec ",0
+
+;for assisting filing 
+buffer byte 5000 DUP(?),0
+sales_buffer byte 5000 DUP(?),0   ;buffer for sales information appending and adding
+receipt byte 1000 DUP(?),0  ;buffer for printing receipt of customer
+myfile byte "Product Information.txt",0
+myfile1 byte "Sales Information.txt",0
+filehandle dword ?
+endl byte 0Dh,0Ah,0
+
+;for assiting update
+update_id byte 3 DUP(?),0
+
+;for assisting delete
+buffer1 byte 5000 DUP(?),0
+delete_id byte 3 DUP(?),0
+prod_id byte 3 DUP(?),0
+
+;for assisting ordering
+order_id byte 3 DUP(?),0
+order_price byte 5 DUP(?),0
+alter_stock byte 5 DUP(?),0
+quant word ?
+total dword 0
+
+;for assisting int to string
+str1 byte 7 DUP(?),0
+
+;for assisting receipt
+r_ptr dword ?
+
+;for assisiting sales
+sales_ptr dword ?
+
+;for checking stock
+stock_checker byte ?
+
+;customer cart
+cart byte ?
+
+.code
+
+main proc				
+						to_main:
+						call clrscr
+						mwrite"			--------------WELCOME TO THE SUPER MARKET MANAGEMENT INTERFACE--------------"
+						call crlf
+						call crlf
+						mwrite"Made by: "
+						call crlf
+						mwrite"1. K173722 Murad Popattia"
+						call crlf
+						mwrite"2. K172372 Siddahant Kumar"
+						call crlf
+						mwrite"3. K173871 Ali Akbar"
+						call crlf
+						call crlf
+						mwrite"						  Enter your identity: "
+						call crlf
+						mwrite"						  1. Admin"
+						call crlf
+						mwrite"						  2. Customer"
+						call crlf
+						call crlf
+						mwrite"						  Enter option: "
+						call readdec
+						
+						cmp eax,1
+						je m_opt1
+						cmp eax,2
+						je m_opt2
+
+						exit
+
+					    m_opt1:
+
+						call crlf
+						call crlf
+						mwrite "					  Enter password: "
+						mreadstring pass_check
+
+						invoke str_compare,addr password, addr pass_check
+						jne wrong
+
+						call admin
+						jmp to_main
+
+						wrong:
+						call crlf
+						call crlf
+						mwrite "Incorrect password!"
+						call crlf
+
+						mov eax,1000
+						call delay
+						jmp to_main
+						
+						m_opt2:
+
+						mov cart,0
+						mov total,0
+						mov r_ptr,0
+						mov edi,0
+						mov receipt[edi],'!'
+
+						cld             ; clear direction flag for REP = count up
+						mov edi,offset str1
+						mov ecx, lengthof str1
+						mov al, 0
+						rep stosb 
+
+						cld             ; clear direction flag for REP = count up
+						mov edi,offset sales_buffer
+						mov ecx, lengthof sales_buffer
+						mov al, 0
+						rep stosb 
+						
+						call customer
+						jmp to_main
+
+exit
+main endp
+
+customer proc  
+                        customer_back:
+
+						call clrscr
+						mwrite"				    -------------Welcome Mr.Customer-----------------"
+						call crlf
+						call crlf
+						mwrite"Current cart: "
+						push eax
+						movzx eax,cart
+						call writedec
+						pop eax
+						call crlf
+						call crlf
+						mwrite"Choose from the options: "
+						call crlf 
+						call crlf
+						mwrite"1.Order an item"
+						call crlf
+						mwrite"2.Cancel whole order"
+						call crlf
+						mwrite"3.Look at order"
+						call crlf
+						mwrite"4.Get product list"
+						call crlf
+						mwrite"5.Proceed to checkout"
+						call crlf
+						call crlf
+						mwrite"Option: "
+						call readdec
+
+						cmp eax,1
+						je c_opt1
+
+						cmp eax,2
+						je c_opt2
+
+						cmp eax,3
+						je c_opt3
+
+						cmp eax,4
+						je c_opt4
+
+						cmp eax,5
+						je c_opt5
+
+						mov ebx,OFFSET caption
+						mov edx,OFFSET question
+						call MsgBoxAsk
+
+						cmp eax,6
+						je c_opt5
+
+						call Cancel_order
+						ret
+
+						c_opt5:
+
+						cmp receipt[0],'!'
+						jne here
+
+						mov ebx,offset caption
+						mov edx,offset question1
+						call MsgBox
+						
+						cld             ; clear direction flag for REP = count up
+						mov edi,offset receipt
+						mov ecx, sizeof receipt
+						mov al, 0
+						rep stosb 
+
+						ret
+
+						here:
+						call clrscr
+						call Proceed_checkout
+
+						cld             ; clear direction flag for REP = count up
+						mov edi,offset receipt
+						mov ecx, sizeof receipt
+						mov al, 0
+						rep stosb 
+
+						ret
+
+						c_opt1:
+						call Order_item
+						jmp customer_back
+
+						c_opt2:
+						call Cancel_order
+						jmp customer_back
+
+						c_opt3:
+						call look_at_order
+						jmp customer_back
+
+						c_opt4:
+						call get_menu
+						jmp customer_back
+						
+ret
+customer endp
+
+Admin proc
+                        
+						admin_back:
+						call clrscr
+						mwrite"				    -------------Welcome Mr.Admin-----------------"
+						call crlf 
+						call crlf
+						mwrite "Choose from the options:"
+						call crlf 
+						call crlf
+						mwrite"1.Add a product"
+						call crlf
+						mwrite"2.Delete a product"
+						call crlf
+						mwrite"3.Update an existing product"
+						call crlf
+						mwrite"4.Get product list"
+						call crlf
+						call crlf
+						mwrite"Option:"
+						call readdec
+
+						cmp eax,1
+						je a_opt1
+						cmp eax,2
+						je a_opt2
+						cmp eax,3
+						je a_opt3
+						cmp eax,4
+						je a_opt4
+						ret
+
+						a_opt1:
+						call Product_add
+						jmp admin_back
+
+						a_opt2:
+						call Product_delete
+						jmp admin_back
+
+						a_opt3:
+						call Product_update
+						jmp admin_back
+						
+						a_opt4:
+						call get_product_list
+						jmp admin_back
+
+
+ret
+Admin endp
+
+Product_add PROC USES eax ebx ecx edx esi edi
+                        call Readtobuffer
+						mov esi,0
+						mov ebx,0
+
+						t2:
+						cmp buffer[esi],"!"
+						je t1
+						inc esi
+						inc ebx
+						jmp t2
+
+						t1:
+						push ebx
+						mov edx,offset myfile
+						call CreateOutputFile
+						mov filehandle,eax
+
+						mwrite "Enter product id: "
+						mov edx,offset prod.id[12]
+						mov ecx,4
+						call readstring
+						mwritestring prod.id
+
+						mov esi,offset prod.id
+						mov ecx,lengthof prod.id
+
+						pop ebx
+						invoke str_copy,addr prod.id, addr buffer[ebx]
+						add ebx,15
+						invoke str_copy,addr endl,addr buffer[ebx]
+						add ebx,2
+						push ebx
+						call crlf
+
+						mwrite "Enter product category: "
+						mov edx,offset prod.category[18]
+						mov ecx,10
+						call readstring
+						mwritestring prod.category
+
+						mov esi,offset prod.category
+						mov ecx,lengthof prod.category
+
+						pop ebx
+						invoke str_copy,addr prod.category, addr buffer[ebx]
+						add ebx,28
+						invoke str_copy,addr endl,addr buffer[ebx]
+						add ebx,2
+						push ebx
+						call crlf
+
+						mwrite "Enter product quantity in stock: "
+						mov edx,offset prod.stock[7]
+						mov ecx,5
+						call readstring
+						mwritestring prod.stock
+
+						mov esi,offset prod.stock
+						mov ecx,lengthof prod.stock
+
+						pop ebx
+						invoke str_copy,addr prod.stock, addr buffer[ebx]
+						add ebx,12
+						invoke str_copy,addr endl,addr buffer[ebx]
+						add ebx,2
+						push ebx
+						call crlf
+
+						mwrite "Enter product price per unit: Rs."
+						mov edx,offset prod.price[7]
+						mov ecx,5
+						call readstring
+						mwritestring prod.price
+
+						push eax
+						call readchar
+						pop eax
+
+						mov esi,offset prod.price
+						mov ecx,lengthof prod.price
+
+						pop ebx
+						invoke str_copy,addr prod.price,addr buffer[ebx]
+						add ebx,12
+						invoke str_copy,addr endl,addr buffer[ebx]
+						add ebx,2
+						invoke str_copy,addr endl,addr buffer[ebx]
+						add ebx,2
+						mov buffer[ebx],"!"
+						inc ebx
+						push ebx
+						call crlf
+
+						mov eax,filehandle
+						mov edx,offset buffer
+						pop ecx
+						call WriteToFile
+
+						mov eax,filehandle
+						call closefile
+
+ret
+Product_add endp
+
+Product_update proc USES eax ebx ecx edx esi edi
+Enter 0,0			
+						call Readtobuffer
+						mwrite "Enter product id to update: "
+						mov edx,offset update_id
+						mov ecx,4
+						call readstring
+
+						mov esi,0
+						mov edi,0
+						mov edx,0
+
+						repeat_delete:
+						cmp buffer[esi],'!'
+						je create_now
+
+						push esi
+						push edi
+						add esi,12
+						mov ecx,3
+						mov ebx,0
+
+						l6:
+						mov dl,buffer[esi]
+						xchg dl,prod_id[ebx]
+						inc ebx
+						inc esi
+						loop l6
+
+						invoke str_compare, addr prod_id, addr update_id
+						jne label1
+
+						call crlf
+						mwrite"Product found"
+						call crlf
+						call crlf
+
+						add esi,2
+
+						mov ebx,offset caption1
+						mov edx,offset question2
+						call MsgBoxAsk
+
+						cmp eax,7 
+						je here1
+
+						mwrite "Enter product's new category: "
+						mov edx,offset prod.category[18]
+						mov ecx,10
+						call readstring
+						mwritestring prod.category
+						call crlf
+
+						invoke str_copy,addr prod.category, addr buffer[esi]
+						
+						here1:
+						mov ebx,offset caption1
+						mov edx,offset question4
+						call MsgBoxAsk
+
+						cmp eax,7
+						je here2
+
+						add esi,30
+						mwrite "Enter product's new stock: "
+						mov edx,offset prod.stock[7]
+						mov ecx,5
+						call readstring
+						mwritestring prod.stock
+						call crlf
+
+						invoke str_copy,addr prod.stock, addr buffer[esi]
+
+						sub esi,30
+
+						here2:
+						mov ebx,offset caption1
+						mov edx,offset question3
+						call MsgBoxAsk
+
+						cmp eax,7
+						je create_now
+
+						add esi,44
+						call crlf
+						mwrite "Enter product's new price: "
+						mov edx,offset prod.price[7]
+						mov ecx,5
+						call readstring
+						mwritestring prod.price
+						call crlf
+
+						invoke str_copy,addr prod.price, addr buffer[esi]
+
+						jmp create_now
+
+						label1:
+						pop edi
+						pop esi
+						add esi,sizeof prod+6 ;+6 is the amount of endl
+						jmp repeat_delete
+						
+						call crlf
+						call crlf
+						mwrite"No such product found!"
+						
+						push eax
+						call readdec
+						pop eax
+
+						leave
+						ret
+
+						create_now:
+						mov edx,offset myfile
+						call Createoutputfile
+
+						mov filehandle,eax
+
+						mov eax,filehandle
+					    mov edx,offset buffer
+						mov ecx,lengthof buffer
+						call Writetofile
+
+						mov eax,filehandle
+						call closefile
+
+						return:
+leave
+ret
+Product_update endp
+
+
+Product_delete proc USES eax ebx ecx edx esi edi
+                        
+						call Readtobuffer
+					    
+						mwrite "Enter product id to delete: "
+						mov edx,offset delete_id
+						mov ecx,4
+						call readstring
+
+						mov esi,0
+						mov edi,0
+						mov edx,0
+
+						repeat_delete:
+						cmp buffer[esi],'!'
+						je create_now
+
+						push esi
+						push edi
+						add esi,12
+						mov ecx,3
+						mov ebx,0
+
+						l6:
+						mov dl,buffer[esi]
+						xchg dl,prod_id[ebx]
+						inc ebx
+						inc esi
+						loop l6
+
+						invoke str_compare, addr prod_id, addr delete_id
+						je label1
+
+						mov ecx,sizeof prod+6
+						pop edi
+						pop esi
+						
+						l7:
+						mov dl,buffer [esi]
+						xchg dl,buffer1 [edi]
+						inc edi
+						inc esi
+						loop l7
+						jmp repeat_delete
+
+						label1:
+						pop edi
+						pop esi
+						add esi,sizeof prod+6 ;+6 is the amount of endl
+						jmp repeat_delete
+
+						create_now:
+						mov buffer1[edi],'!'
+
+						mov edx,offset myfile
+						call Createoutputfile
+
+						mov filehandle,eax
+
+						mov eax,filehandle
+					    mov edx,offset buffer1
+						mov ecx,lengthof buffer1
+						call Writetofile
+
+						mov eax,filehandle
+						call closefile
+
+						cld             ; clear direction flag for REP = count up
+						lea edi, buffer1
+						mov ecx, SIZEOF buffer1
+						mov al, 0
+						rep stosb 
+
+ret
+Product_delete endp
+
+;reads all product information to buffer
+Readtobuffer proc  USES eax ebx ecx edx esi edi
+
+						mov edx,offset myfile
+						call OpenInputFile
+
+						mov filehandle,eax
+
+						mov eax,filehandle
+						mov edx,offset buffer
+						mov ecx,lengthof buffer
+						call readfromfile
+
+						mov eax,filehandle
+						call closefile
+
+ret
+Readtobuffer endp
+
+Writebuffer proc  USES eax ebx ecx edx esi edi
+
+					    mov edx,offset myfile
+						call CreateOutputfile
+
+						mov filehandle,eax
+
+						mov eax,filehandle
+						mov edx,offset buffer
+						mov ecx,lengthof buffer
+						call Writetofile
+						
+						mov eax,filehandle
+						call closefile
+
+ret
+Writebuffer endp
+
+Writesalesbuffer proc  USES eax ebx ecx edx esi edi
+
+					    mov edx,offset myfile1
+						call CreateOutputfile
+
+						mov filehandle,eax
+
+						mov eax,filehandle
+						mov edx,offset sales_buffer
+						mov ecx,lengthof sales_buffer
+						call Writetofile
+						
+						mov eax,filehandle
+						call closefile
+
+ret
+Writesalesbuffer endp
+
+;reads all product information to buffer
+Readtosalesbuffer proc  USES eax ebx ecx edx esi edi
+
+						mov edx,offset myfile1
+						call OpenInputFile
+
+						mov filehandle,eax
+
+						mov eax,filehandle
+						mov edx,offset sales_buffer
+						mov ecx,lengthof sales_buffer
+						call readfromfile
+
+						mov eax,filehandle
+						call closefile
+
+ret
+Readtosalesbuffer endp
+
+Get_product_list proc uses eax esi
+						
+						call readtobuffer
+						call clrscr
+						mwrite"					PRODUCT LIST"
+						call crlf
+						call crlf
+						mov eax,0
+						mov esi,0
+
+						mov esi,0
+						repeat_print:
+						cmp buffer[esi],'!'
+						je return
+
+						mov al,buffer[esi]
+						call writechar
+						inc esi
+
+						jmp repeat_print
+
+				
+return:
+push eax
+call readdec
+pop eax
+ret
+Get_product_list endp
+
+
+Get_menu proc uses eax esi
+						
+						call readtobuffer
+						call clrscr
+						mwrite"			--------SHOPPING MENU---------"
+						call crlf
+						call crlf
+						mov eax,0
+						mov esi,0
+
+						mov esi,0
+						repeat_print:
+						cmp buffer[esi],'!'
+						je return
+
+						mov al,buffer[esi]
+						call writechar
+						inc esi
+
+						jmp repeat_print
+
+				
+return:
+mwrite"			------------------------------"
+push eax
+call readdec
+pop eax
+ret
+Get_menu endp
+
+Convert_to_integer proc USES esi ebx ecx edx, x:ptr byte 
+LOCAL sum:word 
+
+						mov esi,x
+						mov sum,0
+						invoke str_trim,esi,' '
+						invoke str_length,esi
+						mov ecx,eax
+
+						l1:
+						movzx eax,byte ptr [esi]
+						sub eax,48
+						push eax
+						mov eax,1
+						push ecx
+						sub ecx,1
+						cmp ecx,0
+						jle target
+						l2:
+						imul eax,10
+						loop l2
+						target:
+						pop ecx
+
+						mov ebx,eax
+						pop eax
+
+						mul ebx
+						add sum,ax
+						inc esi
+						loop l1
+
+						mov ax,sum
+						
+ret
+Convert_to_integer endp
+
+
+Convert_to_string PROC USES eax ebx ecx esi edx, x:dword 
+LOCAL tsize:byte, divider:dword
+               
+						mov tsize,0
+						mov divider,10
+
+						movzx ebx,tsize
+						mov ecx,10
+						mov eax,x
+
+						l1:
+						cdq
+						cmp eax,0
+						je get_out
+						idiv divider
+						inc ebx
+						jmp l1
+
+						get_out:
+						xchg bl,tsize
+						movzx eax,tsize
+				
+						mov ecx,eax
+						mov esi,eax
+						mov str1[esi],0
+						dec esi
+
+						mov eax,x
+
+						l2:
+						
+						cdq
+						cmp eax,0
+						je return
+						idiv divider
+						mov str1[esi],dl
+						add str1[esi],48
+						dec esi
+						
+						loop l2
+
+return:
+ret
+Convert_to_string endp
+
+
+Overwrite_stock proc USES eax ebx ecx edx esi edi,x:word
+					    
+						cld             ; clear direction flag for REP = count up
+						mov edi,offset str1
+						mov ecx, lengthof str1
+						mov al, 0
+						rep stosb 
+
+						call Readtobuffer
+
+						mov esi,0
+						mov edx,0
+
+						repeat_search_for_ow:
+						cmp buffer[esi],'!'
+						je leave_now
+
+						push esi
+						add esi,12
+						mov ecx,3
+						mov ebx,0
+
+						l1:
+						mov dl,buffer[esi]
+						xchg dl,prod_id[ebx]
+						inc ebx
+						inc esi
+						loop l1
+
+						invoke str_compare, addr prod_id, addr order_id
+						jne label1
+
+						;if found
+						pop esi
+						mov edi,0
+
+						add esi,54
+						push esi
+						mov ecx,5
+
+						l2:
+						mov dl,buffer[esi]
+						xchg dl,alter_stock[edi]
+						inc esi
+						inc edi
+						loop l2
+						
+						invoke convert_to_integer,addr alter_stock
+						
+						cmp ax,x
+						jne pass
+						
+						pop esi
+						mov edi,0
+						mov ecx,5
+
+						mov buffer[esi],'0'
+
+						call Writebuffer
+
+						ret
+
+						pass:
+						sub ax,x
+						invoke convert_to_string,ax
+
+						pop esi
+						mov edi,0
+						mov ecx,5
+
+						l3:
+						mov dl,str1[edi]
+						xchg dl, buffer[esi]
+						inc esi
+						inc edi
+						loop l3
+
+						call Writebuffer
+
+						ret
+
+						label1:
+						pop esi
+						add esi,sizeof prod+6 ;+6 is the amount of endl
+						jmp repeat_search_for_ow	
+						
+						leave_now:
+						call crlf
+						push eax
+						movzx eax,quant
+						sub cart,al
+						pop eax
+						mwrite "No such product found!"
+						push eax
+						call readchar
+						pop eax
+						call crlf
+
+
+ret
+Overwrite_stock endp
+
+Check_in_stock proc, x:word
+
+						mov esi,0
+						repeat_search:
+						cmp buffer[esi],'!'
+						je leave_now
+
+						push esi
+						add esi,12
+						mov ecx,3
+						mov ebx,0
+
+						l6:
+						mov dl,buffer[esi]
+						xchg dl,prod_id[ebx]
+						inc ebx
+						inc esi
+						loop l6
+
+						invoke str_compare, addr prod_id, addr order_id
+						jne label1
+
+						add esi,39
+						mov ecx,5
+						mov edi,0
+						mov edx,0
+
+						l2:
+						mov dl,buffer[esi]
+						xchg dl,str1[edi]
+						inc esi
+						inc edi
+						loop l2
+
+						invoke convert_to_integer,addr str1
+
+						push eax
+
+						cmp ax,0
+						je zero
+
+						pop eax
+
+						cmp ax,x
+						jl lesser
+
+						ret
+
+						label1:
+						pop esi
+						add esi,sizeof prod+6 ;+6 is the amount of endl
+						jmp repeat_search
+
+						leave_now:
+						call crlf
+						mwrite "No such product found!"
+						push eax
+						movzx eax,quant
+						sub cart,al
+						pop eax
+						push eax
+						call readchar
+						pop eax
+						call crlf
+
+						lesser:
+						mov stock_checker,1
+						ret
+
+						zero:
+						mov stock_checker,2
+
+ret
+Check_in_stock endp
+
+Order_item proc  USES eax ebx ecx edx esi edi
+Enter 0,0				
+						
+				        call crlf
+						call crlf
+						mwrite "Enter product id to order: "
+						mov edx,offset order_id
+						mov ecx,4
+						call readstring
+
+						call Readtobuffer
+
+						mov esi,0
+						mov edx,0
+
+						repeat_search:
+						cmp buffer[esi],'!'
+						je leave_now
+
+						push esi
+						add esi,12
+						mov ecx,3
+						mov ebx,0
+
+						l6:
+						mov dl,buffer[esi]
+						xchg dl,prod_id[ebx]
+						inc ebx
+						inc esi
+						loop l6
+
+						invoke str_compare, addr prod_id, addr order_id
+						jne label1
+
+						;if found
+						
+						push esi
+					    mov esi,r_ptr
+						push esi
+						
+						invoke str_copy,addr order_id,addr receipt[esi]
+						mov receipt[esi+3],0
+
+						again:
+						call crlf
+						mwrite "Enter quantity required: "
+						push eax
+						call readdec
+						mov quant,ax
+						pop eax
+
+						mov stock_checker,0	
+						invoke check_in_stock,quant
+
+						cmp stock_checker,2
+						jne check2
+
+						lea ebx,caption1
+						lea edx,message5
+						call MsgBox
+
+						mov esi,r_ptr
+						mov receipt[esi],'!'
+						leave
+						ret
+
+						check2:
+						cmp stock_checker,1
+						jne continue
+
+						lea ebx,caption1
+						lea edx,question5
+						call MsgBoxAsk
+
+						cmp eax,6
+						
+						je again
+
+						mov esi,r_ptr
+						mov receipt[esi],'!'
+						leave
+						ret
+
+						continue:
+						pop esi
+						movzx eax,quant
+						add cart,al
+						mov receipt[esi+4],al
+						mov receipt[esi+5],ah
+						pop esi
+						add r_ptr,5
+
+						pop esi
+						mov edi,0
+						add esi,68
+						mov ecx,5
+
+						copy:
+						mov dl,buffer[esi]
+						xchg dl,order_price[edi]
+						inc esi
+						inc edi
+						loop copy
+
+						invoke Convert_to_integer, addr order_price
+						push esi
+						mov esi,r_ptr
+
+						mov receipt[esi+1],ah
+						mov receipt[esi+2],al
+						mov receipt[esi+3],'!'
+						pop esi
+						add r_ptr,3
+						
+						movzx ebx,quant
+						mul ebx
+						add total,eax
+
+						leave
+						ret
+
+						label1:
+						pop esi
+						add esi,sizeof prod+6 ;+6 is the amount of endl
+						jmp repeat_search
+
+						leave_now:
+						call crlf
+						mwrite "No such product found!"
+						push eax
+						call readchar
+						pop eax
+						call crlf
+
+leave	
+ret
+Order_item endp
+
+Cancel_order proc uses edi
+						
+						mov edi,0
+						mov cart,0
+						cmp receipt[0],'!'
+						jne here
+
+						jmp return
+
+						here:
+						cld             ; clear direction flag for REP = count up
+						mov edi,offset receipt
+						mov ecx, sizeof receipt
+						mov al, 0
+						rep stosb
+						mov receipt[0],'!' 
+						mov r_ptr,0
+
+return:
+ret
+Cancel_order endp
+
+Look_at_order proc uses esi eax
+						
+						call clrscr
+						mov esi,0
+
+						cmp receipt[0],'!'
+						jne here
+
+						mov ebx,offset caption
+						mov edx,offset question1
+						call MsgBox
+						ret
+						
+						here:
+						mwrite "			-----------------Your Pre-ordered items-------------- "
+						call crlf
+						call crlf
+
+						mwrite "Cart: "
+						push eax
+						movzx eax,cart
+						call writedec
+						pop eax
+
+						call crlf
+						call crlf
+
+						_repeat:
+						cmp receipt[esi],'!'
+						je return
+					    
+						mwrite"Product id: "
+						lea edx, receipt[esi]
+						mov ecx,3
+						call writestring
+
+						mov eax,0
+						call crlf
+						mwrite"Quantity purchased: "
+						mov al,receipt[esi+4]
+						mov ah,receipt[esi+5]
+
+						call writedec
+
+						call crlf
+						mwrite"Price per product: Rs."
+						mov eax,0
+						mov ah,receipt[esi+6]
+						mov al,receipt[esi+7]
+						call writedec
+
+						call crlf
+						call crlf
+						add esi,8
+						jmp _repeat
+
+						return:
+						push eax
+						call readdec
+						pop eax
+ret
+Look_at_order endp
+
+Locatesales_ptr proc USES esi ebx
+
+						call Readtosalesbuffer
+						mov esi,0
+						mov ebx,0
+
+						t2:
+						cmp sales_buffer[esi],"!"
+						je t1
+						inc esi
+						inc ebx
+						jmp t2
+
+						t1:
+						mov sales_ptr,esi
+
+ret
+Locatesales_ptr endp
+
+Generatesales_id proc USES eax
+						
+						call randomize
+
+						mov eax,80000
+						cdq
+						call randomrange
+						add eax,10000
+						invoke convert_to_string,eax
+						invoke str_copy,addr str1,addr sale.id[10]
+
+ret
+Generatesales_id endp
+
+Proceed_checkout proc USES esi edi eax ebx ecx edx
+Enter 0,0               
+
+        
+						call generatesales_id
+
+						mwrite"###########################################################"
+						call crlf
+						mwrite"# Printed receipt                                         #"
+						call crlf
+						mwrite"# Thankyou for shopping with us                           #"
+						call crlf
+						mwrite"# You checked out at: "
+						INVOKE Getlocaltime, Addr systime
+						movzx eax,systime.wday
+						call writedec
+
+						;for sales
+						call Locatesales_ptr
+						invoke convert_to_string,eax
+						push esi
+						mov esi,sales_ptr
+						invoke str_copy,addr str1, addr sales_buffer[esi]
+						inc sales_ptr
+						pop esi
+						;
+						
+						mwrite"-"
+						movzx eax,systime.wmonth
+						call writedec
+
+						;for sales
+						push esi
+						mov esi,sales_ptr
+
+						cmp eax,1
+						jne t1
+						invoke str_copy,addr m1,addr sales_buffer[esi]
+						invoke str_length,addr m1
+						add sales_ptr,eax
+						jmp here
+
+						t1:
+
+						cmp eax,2
+						jne t2
+						invoke str_copy,addr m2,addr sales_buffer[esi]
+						invoke str_length,addr m2
+						add sales_ptr,eax
+						jmp here
+						
+						t2:
+
+						cmp eax,3
+						jne t3
+						invoke str_copy,addr m3,addr sales_buffer[esi]
+						invoke str_length,addr m3
+						add sales_ptr,eax
+						jmp here
+
+						t3:
+
+						cmp eax,4
+						jne t4
+						invoke str_copy,addr m4,addr sales_buffer[esi]
+						invoke str_length,addr m4
+						add sales_ptr,eax
+						jmp here
+
+						t4:
+
+						cmp eax,5
+						jne t5
+						invoke str_copy,addr m5,addr sales_buffer[esi]
+						invoke str_length,addr m5
+						add sales_ptr,eax
+						jmp here
+
+						t5:
+
+						cmp eax,6
+						jne t6
+						invoke str_copy,addr m6,addr sales_buffer[esi]
+						invoke str_length,addr m6
+						add sales_ptr,eax
+						jmp here
+
+						t6:
+
+						cmp eax,7
+						jne t7
+						invoke str_copy,addr m7,addr sales_buffer[esi]
+						invoke str_length,addr m7
+						add sales_ptr,eax
+						jmp here
+
+						t7:
+
+						cmp eax,8
+						jne t8
+						invoke str_copy,addr m8,addr sales_buffer[esi]
+						invoke str_length,addr m8
+						add sales_ptr,eax
+						jmp here
+
+						t8:
+
+						cmp eax,9
+						jne t9
+						invoke str_copy,addr m9,addr sales_buffer[esi]
+						invoke str_length,addr m9
+						add sales_ptr,eax
+						jmp here
+
+						t9:
+
+						cmp eax,10
+						jne t10
+						invoke str_copy,addr m10,addr sales_buffer[esi]
+						invoke str_length,addr m10
+						add sales_ptr,eax
+						jmp here
+
+						t10:
+
+						cmp eax,11
+						jne t11
+						invoke str_copy,addr m11,addr sales_buffer[esi]
+						invoke str_length,addr m11
+						add sales_ptr,eax
+						jmp here
+
+						t11:
+						
+						invoke str_copy,addr m12,addr sales_buffer[esi]
+						invoke str_length,addr m12
+						add sales_ptr,eax
+						;
+
+						here:
+						pop esi
+
+						mwrite"-"
+						movzx eax,systime.wyear
+						call writedec
+
+						push esi
+						invoke Convert_to_string,eax
+						mov esi,sales_ptr
+						inc esi
+						invoke str_copy,addr str1,addr sales_buffer[esi]
+						add esi,4
+						mov sales_buffer[esi],':'
+						inc esi
+						invoke str_copy,addr endl,addr sales_buffer[esi]
+						add esi,2
+						invoke str_copy,addr sale.id,addr sales_buffer[esi]
+						add esi,15
+						invoke str_copy,addr endl,addr sales_buffer[esi]
+						add esi,2
+						invoke str_copy,addr endl,addr sales_buffer[esi]
+						add esi,2
+						mov sales_ptr,esi
+
+						mwrite"  Time: "
+						movzx eax,systime.whour
+						call writedec
+						mwrite":"
+						movzx eax,systime.wminute
+						call writedec
+						mwrite"              #"
+						call crlf
+						mwrite"###########################################################"
+
+						call crlf
+
+						mov esi,0
+
+						_repeat:
+						cmp receipt[esi],'!'
+						je return
+					    
+						mwrite"Product id: "
+						lea edx, receipt[esi]
+						mov ecx,3
+						call writestring
+
+						mov ecx,3
+						push esi
+						push edi
+						mov edi,12
+						l1:
+						mov dl,receipt[esi]
+						xchg dl,sale.sellprod_id[edi]
+						inc edi
+						inc esi
+						loop l1
+
+						mov esi,sales_ptr
+						invoke str_copy,addr sale.sellprod_id,addr sales_buffer[esi]
+						add esi,15
+						invoke str_copy,addr endl,addr sales_buffer[esi]
+						add esi,2
+						mov sales_ptr,esi
+
+						pop edi
+						pop esi
+
+						mov eax,0
+						call crlf
+						mwrite"Quantity purchased: "
+						mov al,receipt[esi+4]
+						mov ah,receipt[esi+5]
+
+						Invoke str_copy,addr sale.sellprod_id[12],addr order_id
+						Invoke Overwrite_stock, ax
+
+						call writedec
+
+						push esi
+						push edi
+
+						mov edi,10
+						invoke convert_to_string,eax
+						invoke str_copy,addr str1, addr sale.sale_quantity[edi]
+						mov esi,sales_ptr
+
+						invoke str_copy,addr sale.sale_quantity,addr sales_buffer[esi]
+						add esi,15
+						invoke str_copy,addr endl,addr sales_buffer[esi]
+						add esi,2
+						mov sales_ptr,esi
+
+						call crlf
+
+						pop edi
+						pop esi
+
+						mwrite"Price per product: Rs."
+						mov eax,0
+						mov ah,receipt[esi+6]
+						mov al,receipt[esi+7]
+						call writedec
+
+						push esi
+						push edi
+
+						mov edi,7
+						invoke convert_to_string,eax
+						invoke str_copy,addr str1, addr sale.sale_price[edi]
+						mov esi,sales_ptr
+
+						invoke str_copy,addr sale.sale_price,addr sales_buffer[esi]
+						add esi,12
+						invoke str_copy,addr endl,addr sales_buffer[esi]
+						add esi,2
+						invoke str_copy,addr endl,addr sales_buffer[esi]
+						add esi,2
+						mov sales_buffer[esi],'!'
+						mov sales_ptr,esi
+
+						pop edi
+						pop esi
+
+						call crlf
+						call crlf
+						add esi,8
+						jmp _repeat
+
+						return:
+						mwrite "Your bill amounts to: Rs."
+						mov eax,total
+						call writedec
+
+						invoke convert_to_string,eax
+						invoke str_copy,addr str1, addr sale.total[20]
+						push esi
+						mov esi,sales_ptr
+						invoke str_copy,addr sale.total,addr sales_buffer[esi]
+						add esi,27
+						invoke str_copy,addr endl,addr sales_buffer[esi]
+						add esi,2
+						invoke str_copy,addr endl,addr sales_buffer[esi]
+						add esi,2
+						mov sales_buffer[esi],'!'
+						mov sales_ptr,esi
+						pop esi
+						call writesalesbuffer
+
+						push eax
+						call readchar
+						pop eax
+
+leave
+ret
+proceed_checkout endp
+
+END main
